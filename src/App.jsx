@@ -14,10 +14,20 @@ const DRINK_TYPES = [
 ];
 const DAY_JP  = ["日","月","火","水","木","金","土"];
 const LIMIT_G = 20;
+const START_DATE = "2026-04-01";
+
+const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY || "";
 
 // ── Helpers ──────────────────────────────────────────────────────
 const getToday    = () => new Date().toISOString().split("T")[0];
 const calcAlcohol = (drinks) => drinks.reduce((s,d)=>s+(DRINK_TYPES.find(t=>t.id===d.type)?.alcohol??10),0);
+
+// Returns the earliest date that has a drink record (= "app start date")
+// Days before this are not counted as 休肝日
+const getTrackingStart = (allDrinks) => {
+  const days = Object.keys(allDrinks).filter(d=>(allDrinks[d]||[]).length>0).sort();
+  return days[0] || getToday();
+};
 
 const getWeekDates = (ago=0) => {
   const dates=[],base=new Date(); base.setDate(base.getDate()-ago*7);
@@ -375,22 +385,34 @@ function WeekBar({ allDrinks }) {
 }
 
 // ── Monthly Calendar (dark) ─────────────────────────────────────
-function MonthlyCalendar({ allDrinks }) {
+function MonthlyCalendar({ allDrinks, onDeleteDates }) {
   const now=new Date();
   const [year,setYear]=useState(now.getFullYear());
   const [month,setMonth]=useState(now.getMonth()+1);
   const today=getToday(),days=getMonthDates(year,month);
   const firstDow=new Date(year,month-1,1).getDay();
-  const prev=()=>month===1?(setYear(y=>y-1),setMonth(12)):setMonth(m=>m-1);
+  // 2026年4月より前には戻れない
+  const canPrev=!(year===2026&&month===4);
+  const prev=()=>{if(!canPrev)return; month===1?(setYear(y=>y-1),setMonth(12)):setMonth(m=>m-1);};
   const next=()=>month===12?(setYear(y=>y+1),setMonth(1)):setMonth(m=>m+1);
-  const canNext=year<now.getFullYear()||(year===now.getFullYear()&&month<now.getMonth()+1);
-  const pastDays=days.filter(({dateStr})=>new Date(dateStr+"T00:00:00")<=now);
+  const canNext=true; // 未来の月も記録できる
+
+  const startDate=Object.keys(allDrinks).filter(d=>(allDrinks[d]||[]).length>0).sort()[0]||today;
+  const isTracked=(dateStr)=>dateStr>=START_DATE&&dateStr>=startDate;
+
+  const pastDays=days.filter(({dateStr})=>new Date(dateStr+"T00:00:00")<=now&&isTracked(dateStr));
   const mTotal=days.reduce((s,{dateStr})=>s+(allDrinks[dateStr]||[]).length,0);
   const noDrink=pastDays.filter(({dateStr})=>(allDrinks[dateStr]||[]).length===0).length;
   const noPct=pastDays.length?Math.round(noDrink/pastDays.length*100):0;
+
+  const handleDeleteMonth=()=>{
+    const dates=days.map(d=>d.dateStr).filter(d=>d>=START_DATE);
+    if(window.confirm(`${year}年${month}月の記録を全て削除しますか？`)) onDeleteDates(dates);
+  };
+
   const cellStyle=(count,dateStr)=>{
     if(new Date(dateStr+"T00:00:00")>now) return{bg:"transparent",text:"rgba(255,255,255,0.15)"};
-    if(count===0) return{bg:"rgba(62,207,187,0.12)",text:T.teal};
+    if(count===0) return{bg:isTracked(dateStr)?"rgba(62,207,187,0.12)":"transparent",text:T.teal};
     if(count<=2)  return{bg:"rgba(212,144,58,0.18)",text:"#E0A050"};
     if(count<=4)  return{bg:"rgba(220,100,50,0.22)",text:"#E07050"};
     return{bg:"rgba(224,80,80,0.25)",text:T.danger};
@@ -399,7 +421,7 @@ function MonthlyCalendar({ allDrinks }) {
   return (
     <div style={{padding:"0 16px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <button onClick={prev} style={nav}>‹</button>
+        <button onClick={prev} disabled={!canPrev} style={{...nav,color:canPrev?T.muted:"rgba(255,255,255,0.1)"}}>‹</button>
         <div style={{fontSize:17,fontWeight:"bold",color:T.text}}>{year}年{month}月</div>
         <button onClick={next} disabled={!canNext} style={{...nav,color:canNext?T.muted:"rgba(255,255,255,0.1)"}}>›</button>
       </div>
@@ -429,22 +451,31 @@ function MonthlyCalendar({ allDrinks }) {
                   {count>2&&<span style={{fontSize:9,color:T.danger}}>+{count-2}</span>}
                 </div>
               )}
-              {!isFuture&&count===0&&<div style={{fontSize:12,marginTop:1}}>🌿</div>}
+              {!isFuture&&count===0&&isTracked(dateStr)&&<div style={{fontSize:12,marginTop:1}}>🌿</div>}
             </div>
           );
         })}
       </div>
+      {mTotal>0&&(
+        <button onClick={handleDeleteMonth} style={{width:"100%",marginTop:14,padding:"11px",background:"rgba(224,80,80,0.1)",border:`1px solid rgba(224,80,80,0.3)`,borderRadius:12,color:T.danger,fontSize:13,cursor:"pointer"}}>
+          🗑 {year}年{month}月の記録をまとめて削除
+        </button>
+      )}
     </div>
   );
 }
 
 // ── Weekly View (dark) ─────────────────────────────────────────
-function WeeklyView({ allDrinks, onDeleteDrink }) {
-  const today=getToday(),weekDates=getWeekDates(0);
+function WeeklyView({ allDrinks, onDeleteDrink, onDeleteDates }) {
+  const today=getToday();
+  const weekDates=getWeekDates(0).filter(d=>d>=START_DATE);
   const wTotal=weekDates.reduce((s,d)=>s+(allDrinks[d]||[]).length,0);
   const wAlco=weekDates.reduce((s,d)=>s+calcAlcohol(allDrinks[d]||[]),0);
   const noDrink=weekDates.filter(d=>(allDrinks[d]||[]).length===0).length;
   const fmtD=(ds)=>{const d=new Date(ds+"T00:00:00");return `${d.getMonth()+1}/${d.getDate()}（${DAY_JP[d.getDay()]}）`;};
+  const handleDeleteWeek=()=>{
+    if(window.confirm("今週の記録を全て削除しますか？")) onDeleteDates(weekDates);
+  };
   return (
     <div style={{padding:"0 16px"}}>
       <div style={{fontSize:12,color:T.muted,marginBottom:10,textAlign:"center"}}>各お酒の × を押すと削除できます</div>
@@ -485,36 +516,54 @@ function WeeklyView({ allDrinks, onDeleteDrink }) {
           </div>
         );
       })}
+      {wTotal>0&&(
+        <button onClick={handleDeleteWeek} style={{width:"100%",marginTop:4,padding:"11px",background:"rgba(224,80,80,0.1)",border:`1px solid rgba(224,80,80,0.3)`,borderRadius:12,color:T.danger,fontSize:13,cursor:"pointer"}}>
+          🗑 今週の記録をまとめて削除
+        </button>
+      )}
     </div>
   );
 }
 
 // ── Yearly View (dark) ─────────────────────────────────────────
-function YearlyView({ allDrinks }) {
+function YearlyView({ allDrinks, onDeleteDates }) {
   const now=new Date();
   const [year,setYear]=useState(now.getFullYear());
-  const canNext=year<now.getFullYear();
+  const canPrev=year>2026;
+  const canNext=true; // 未来の年も記録できる
   const months=Array.from({length:12},(_,i)=>{
     const m=i+1,daysInMonth=new Date(year,m,0).getDate();
-    const dates=Array.from({length:daysInMonth},(_,d)=>`${year}-${String(m).padStart(2,"0")}-${String(d+1).padStart(2,"0")}`);
+    // 2026年は4月以前をスキップ
+    const isBeforeStart=year===2026&&m<4;
+    const dates=Array.from({length:daysInMonth},(_,d)=>{
+      const ds=`${year}-${String(m).padStart(2,"0")}-${String(d+1).padStart(2,"0")}`;
+      return ds;
+    }).filter(d=>d>=START_DATE);
     const pastDates=dates.filter(d=>new Date(d+"T00:00:00")<=now);
     const total=dates.reduce((s,d)=>s+(allDrinks[d]||[]).length,0);
     const nodrink=pastDates.filter(d=>(allDrinks[d]||[]).length===0).length;
     const alcohol=dates.reduce((s,d)=>s+calcAlcohol(allDrinks[d]||[]),0);
     const isFuture=year===now.getFullYear()&&m>now.getMonth()+1;
-    return{m,total,nodrink,alcohol,isFuture};
+    return{m,total,nodrink,alcohol,isFuture,isBeforeStart,dates};
   });
-  const maxTotal=Math.max(1,...months.filter(m=>!m.isFuture).map(m=>m.total));
-  const yTotal=months.reduce((s,m)=>s+m.total,0);
-  const yNodrink=months.reduce((s,m)=>s+m.nodrink,0);
-  const yAlco=months.reduce((s,m)=>s+m.alcohol,0);
-  const bestMonth=[...months].filter(m=>!m.isFuture&&m.total>0).sort((a,b)=>a.total-b.total)[0];
+  const visibleMonths=months.filter(m=>!m.isBeforeStart);
+  const maxTotal=Math.max(1,...visibleMonths.filter(m=>!m.isFuture).map(m=>m.total));
+  const yTotal=visibleMonths.reduce((s,m)=>s+m.total,0);
+  const yNodrink=visibleMonths.reduce((s,m)=>s+m.nodrink,0);
+  const yAlco=visibleMonths.reduce((s,m)=>s+m.alcohol,0);
+  const bestMonth=[...visibleMonths].filter(m=>!m.isFuture&&m.total>0).sort((a,b)=>a.total-b.total)[0];
   const barC=(total)=>total===0?"rgba(255,255,255,0.08)":total<=5?T.teal:total<=12?T.warn:T.danger;
   const nav={background:"none",border:`1px solid ${T.cardBdr}`,borderRadius:20,padding:"6px 16px",cursor:"pointer",color:T.muted,fontSize:18};
+
+  const handleDeleteYear=()=>{
+    const allDates=visibleMonths.flatMap(m=>m.dates);
+    if(window.confirm(`${year}年の記録を全て削除しますか？`)) onDeleteDates(allDates);
+  };
+
   return (
     <div style={{padding:"0 16px"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-        <button onClick={()=>setYear(y=>y-1)} style={nav}>‹</button>
+        <button onClick={()=>setYear(y=>y-1)} disabled={!canPrev} style={{...nav,color:canPrev?T.muted:"rgba(255,255,255,0.1)"}}>‹</button>
         <div style={{fontSize:17,fontWeight:"bold",color:T.text}}>{year}年</div>
         <button onClick={()=>setYear(y=>y+1)} disabled={!canNext} style={{...nav,color:canNext?T.muted:"rgba(255,255,255,0.1)"}}>›</button>
       </div>
@@ -528,7 +577,7 @@ function YearlyView({ allDrinks }) {
       </div>
       {bestMonth&&<div style={{...card,color:T.teal,fontSize:13,display:"flex",alignItems:"center",gap:8,marginBottom:14}}><span>🌿</span>最も少なかった月: {bestMonth.m}月（{bestMonth.total}杯）</div>}
       <div style={{...card,padding:"14px 12px"}}>
-        {months.map(({m,total,nodrink,isFuture})=>(
+        {visibleMonths.map(({m,total,nodrink,isFuture})=>(
           <div key={m} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
             <div style={{width:26,fontSize:11,color:T.muted,textAlign:"right",flexShrink:0}}>{m}月</div>
             <div style={{flex:1,background:"rgba(255,255,255,0.06)",borderRadius:6,height:28,overflow:"hidden",position:"relative"}}>
@@ -553,12 +602,17 @@ function YearlyView({ allDrinks }) {
           ))}
         </div>
       </div>
+      {yTotal>0&&(
+        <button onClick={handleDeleteYear} style={{width:"100%",marginTop:12,padding:"11px",background:"rgba(224,80,80,0.1)",border:`1px solid rgba(224,80,80,0.3)`,borderRadius:12,color:T.danger,fontSize:13,cursor:"pointer"}}>
+          🗑 {year}年の記録をまとめて削除
+        </button>
+      )}
     </div>
   );
 }
 
 // ── Records View ────────────────────────────────────────────────
-function RecordsView({ allDrinks, onDeleteDrink }) {
+function RecordsView({ allDrinks, onDeleteDrink, onDeleteDates }) {
   const [sub,setSub]=useState("weekly");
   return (
     <div>
@@ -575,9 +629,9 @@ function RecordsView({ allDrinks, onDeleteDrink }) {
           }}>{t.l}</button>
         ))}
       </div>
-      {sub==="weekly"  && <WeeklyView      allDrinks={allDrinks} onDeleteDrink={onDeleteDrink}/>}
-      {sub==="monthly" && <MonthlyCalendar allDrinks={allDrinks}/>}
-      {sub==="yearly"  && <YearlyView      allDrinks={allDrinks}/>}
+      {sub==="weekly"  && <WeeklyView     allDrinks={allDrinks} onDeleteDrink={onDeleteDrink} onDeleteDates={onDeleteDates}/>}
+      {sub==="monthly" && <MonthlyCalendar allDrinks={allDrinks} onDeleteDates={onDeleteDates}/>}
+      {sub==="yearly"  && <YearlyView     allDrinks={allDrinks} onDeleteDates={onDeleteDates}/>}
     </div>
   );
 }
@@ -593,17 +647,32 @@ export default function DrinkTracker() {
   const [jiggle,setJiggle]       = useState(false);
   const [analyzing,setAnalyzing] = useState(false);
   const [aiGuess,setAiGuess]     = useState(null);
+  const [confirmReset,setConfirmReset] = useState(false);
+  const [adviceOpen,setAdviceOpen]   = useState(false);
+  const [advice,setAdvice]           = useState("");
+  const [adviceLoading,setAdviceLoading] = useState(false);
   const fileRef = useRef();
 
   useEffect(()=>{
-    try{
-      const raw=localStorage.getItem("drink-data-v2");
-      if(raw) setAllDrinks(JSON.parse(raw));
-    }catch(_){}
-    setLoading(false);
+    (async()=>{
+      try{
+        const r=await window.storage.get("drink-data-v2");
+        if(r){
+          const raw=JSON.parse(r.value);
+          // 2026-04-01より前のキーを自動削除
+          const cleaned=Object.fromEntries(Object.entries(raw).filter(([k])=>k>=START_DATE));
+          setAllDrinks(cleaned);
+          // キーが減っていたら保存し直す
+          if(Object.keys(cleaned).length < Object.keys(raw).length){
+            await window.storage.set("drink-data-v2",JSON.stringify(cleaned));
+          }
+        }
+      }catch(_){}
+      setLoading(false);
+    })();
   },[]);
 
-  const save=(data)=>{try{localStorage.setItem("drink-data-v2",JSON.stringify(data));}catch(e){console.error(e);}};
+  const save=async(data)=>{try{await window.storage.set("drink-data-v2",JSON.stringify(data));}catch(e){console.error(e);}};
 
   const todayDrinks=allDrinks[getToday()]||[];
   const todayAlcohol=calcAlcohol(todayDrinks);
@@ -615,41 +684,95 @@ export default function DrinkTracker() {
     const type=DRINK_TYPES.find(t=>t.id===selType),today=getToday();
     const entry={id:Date.now(),type:type.id,emoji:type.emoji,label:type.label,timestamp:new Date().toISOString(),thumb:photo||null};
     const updated={...allDrinks,[today]:[...(allDrinks[today]||[]),entry]};
-    setAllDrinks(updated);save(updated);
+    setAllDrinks(updated);await save(updated);
     setSelType(null);setPhoto(null);setAddOpen(false);setAiGuess(null);
     setJiggle(true);setTimeout(()=>setJiggle(false),600);
   };
 
-  const handleDeleteDrink=(date,drinkId)=>{
+  const handleDeleteDrink=async(date,drinkId)=>{
     const updated={...allDrinks,[date]:(allDrinks[date]||[]).filter(d=>d.id!==drinkId)};
-    setAllDrinks(updated);save(updated);
+    setAllDrinks(updated);await save(updated);
   };
 
-  const handleUndoLast=()=>{
+  const handleDeleteDates=async(dates)=>{
+    const updated={...allDrinks};
+    dates.forEach(d=>{ delete updated[d]; });
+    setAllDrinks(updated);await save(updated);
+  };
+
+  const handleUndoLast=async()=>{
     const today=getToday(),list=allDrinks[today]||[];
     if(!list.length)return;
     const updated={...allDrinks,[today]:list.slice(0,-1)};
-    setAllDrinks(updated);save(updated);
+    setAllDrinks(updated);await save(updated);
+  };
+
+  const handleReset=async()=>{
+    setAllDrinks({});
+    await save({});
+    setConfirmReset(false);
   };
 
   const analyzePhoto=async(base64)=>{
     setAnalyzing(true);setAiGuess(null);
     try{
-      const key=import.meta.env.VITE_GEMINI_KEY;
-      const res=await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`,
-        {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({contents:[{parts:[
-            {inline_data:{mime_type:"image/jpeg",data:base64.split(",")[1]}},
-            {text:'この画像のお酒をJSONのみで答えてください（他の文章不要）。形式: {"typeId":"..."} 選択肢: beer, wine, sake, shochu, chuhai, highball, other'}
-          ]}]})}
-      );
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:60,messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64.split(",")[1]}},
+          {type:"text",text:`この画像に写っているお酒を判断。以下のIDから1つ選び{"typeId":"..."}のJSONのみ回答。beer,wine,sake,shochu,chuhai,highball,other`}
+        ]}]})});
       const data=await res.json();
-      const text=(data.candidates?.[0]?.content?.parts?.[0]?.text||"").replace(/```json|```/g,"").trim();
+      const text=(data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
       const parsed=JSON.parse(text);
       if(DRINK_TYPES.map(t=>t.id).includes(parsed.typeId)){setSelType(parsed.typeId);setAiGuess(parsed.typeId);}
     }catch(e){console.error("AI分析失敗",e);}
     setAnalyzing(false);
+  };
+
+  const fetchAdvice=async()=>{
+    setAdviceOpen(true);
+    setAdvice("");
+    setAdviceLoading(true);
+    try{
+      // 直近7日間のデータをまとめる
+      const dates=getWeekDates(0);
+      const weekSummary=dates.map(d=>{
+        const drinks=allDrinks[d]||[];
+        const alco=calcAlcohol(drinks);
+        const label=new Date(d+"T00:00:00").toLocaleDateString("ja-JP",{month:"numeric",day:"numeric",weekday:"short"});
+        return drinks.length===0
+          ? `${label}: 休肝日`
+          : `${label}: ${drinks.map(dr=>dr.label).join("・")}（${alco}g）`;
+      }).join("\n");
+      const totalAlco=dates.reduce((s,d)=>s+calcAlcohol(allDrinks[d]||[]),0);
+      const noDrinkDays=dates.filter(d=>(allDrinks[d]||[]).length===0).length;
+
+      const prompt=`あなたは健康的な飲酒習慣をサポートするAIです。以下は私の直近1週間の飲酒記録です。
+
+${weekSummary}
+
+週合計純アルコール: ${totalAlco}g（厚労省推奨: 週140g以下）
+休肝日: ${noDrinkDays}日
+
+この記録を見て、
+・良かった点（ポジティブな声がけ）
+・気になる点（あれば、やさしく）
+・来週に向けた具体的なアドバイス1〜2個
+
+を、友達に話しかけるような温かいトーンで、200字以内でまとめてください。`;
+
+      const res=await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+        {method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})}
+      );
+      const data=await res.json();
+      const text=data.candidates?.[0]?.content?.parts?.[0]?.text||"アドバイスを取得できませんでした。";
+      setAdvice(text);
+    }catch(e){
+      setAdvice("通信エラーが発生しました。インターネット接続を確認してください。");
+    }
+    setAdviceLoading(false);
   };
 
   const handlePhoto=async(e)=>{const f=e.target.files?.[0];if(!f)return;const t=await resizeImage(f);setPhoto(t);setSelType(null);analyzePhoto(t);};
@@ -676,6 +799,31 @@ export default function DrinkTracker() {
 
   return (
     <div style={{maxWidth:430,margin:"0 auto",minHeight:"100vh",background:T.bg,fontFamily:"'Hiragino Kaku Gothic ProN','Hiragino Sans','YuGothic',sans-serif",paddingBottom:150,color:T.text}}>
+
+      {/* ── Confirm Reset Modal ── */}
+      {confirmReset&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"0 24px"}} onClick={()=>setConfirmReset(false)}>
+          <div style={{background:"#1A1A28",border:`1px solid ${T.cardBdr}`,borderRadius:20,padding:"28px 24px",width:"100%",maxWidth:360,textAlign:"center"}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontSize:44,marginBottom:12}}>🗑️</div>
+            <div style={{fontSize:17,fontWeight:"bold",color:T.text,marginBottom:8}}>全データをリセット</div>
+            <div style={{fontSize:13,color:T.muted,marginBottom:24,lineHeight:1.6}}>
+              これまでの記録が<span style={{color:T.danger,fontWeight:"bold"}}>全て消えます</span>。<br/>この操作は元に戻せません。
+            </div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setConfirmReset(false)} style={{
+                flex:1,padding:"13px",background:"rgba(255,255,255,0.07)",
+                border:`1px solid ${T.cardBdr}`,borderRadius:12,
+                color:T.muted,fontSize:14,cursor:"pointer",
+              }}>キャンセル</button>
+              <button onClick={handleReset} style={{
+                flex:1,padding:"13px",background:T.danger,
+                border:"none",borderRadius:12,
+                color:"white",fontSize:14,fontWeight:"bold",cursor:"pointer",
+              }}>リセットする</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Add Sheet ── */}
       {addOpen&&(
@@ -805,7 +953,51 @@ export default function DrinkTracker() {
           )}
         </div>
       )}
-      {tab==="records"&&<RecordsView allDrinks={allDrinks} onDeleteDrink={handleDeleteDrink}/>}
+      {tab==="records"&&<RecordsView allDrinks={allDrinks} onDeleteDrink={handleDeleteDrink} onDeleteDates={handleDeleteDates}/>}
+
+      {/* ── Advice Modal ── */}
+      {adviceOpen&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",zIndex:200,display:"flex",alignItems:"flex-end"}} onClick={()=>setAdviceOpen(false)}>
+          <div style={{
+            background:"#13131F",border:`1px solid ${T.cardBdr}`,
+            borderRadius:"22px 22px 0 0",padding:"24px 20px 44px",
+            width:"100%",maxWidth:430,margin:"0 auto",
+            boxShadow:"0 -12px 40px rgba(0,0,0,0.6)",
+          }} onClick={e=>e.stopPropagation()}>
+            <div style={{width:36,height:4,background:"rgba(255,255,255,0.15)",borderRadius:99,margin:"0 auto 18px"}}/>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:16}}>
+              <span style={{fontSize:28}}>💡</span>
+              <div>
+                <div style={{fontSize:16,fontWeight:"bold",color:T.text}}>AIアドバイス</div>
+                <div style={{fontSize:11,color:T.muted}}>直近1週間の記録をもとに</div>
+              </div>
+            </div>
+
+            {adviceLoading?(
+              <div style={{textAlign:"center",padding:"32px 0",color:T.teal}}>
+                <div style={{fontSize:32,animation:"spin 1.2s linear infinite",display:"inline-block",marginBottom:12}}>✨</div>
+                <div style={{fontSize:14}}>AIが分析中です…</div>
+              </div>
+            ):(
+              <div>
+                <div style={{
+                  background:"rgba(62,207,187,0.07)",
+                  border:`1px solid rgba(62,207,187,0.2)`,
+                  borderRadius:14,padding:"16px",
+                  fontSize:14,lineHeight:1.75,color:T.text,
+                  whiteSpace:"pre-wrap",marginBottom:16,
+                }}>{advice}</div>
+                <button onClick={fetchAdvice} style={{
+                  width:"100%",padding:"11px",
+                  background:"rgba(255,255,255,0.06)",
+                  border:`1px solid ${T.cardBdr}`,
+                  borderRadius:12,color:T.muted,fontSize:13,cursor:"pointer",
+                }}>🔄 もう一度アドバイスをもらう</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Bottom bar ── */}
       <div style={{
@@ -827,13 +1019,17 @@ export default function DrinkTracker() {
             <span style={{fontSize:20}}>＋</span>飲み物を記録する
           </button>
         </div>
-        <div style={{display:"flex",justifyContent:"space-around"}}>
+        <div style={{display:"flex",justifyContent:"space-around",alignItems:"center"}}>
           {[{id:"home",emoji:"🫁",label:"お腹"},{id:"records",emoji:"📊",label:"記録"}].map(t=>(
             <button key={t.id} onClick={()=>setTab(t.id)} style={{background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,color:tab===t.id?T.teal:T.muted,transition:"color 0.2s"}}>
               <span style={{fontSize:22}}>{t.emoji}</span>
               <span style={{fontSize:10,fontWeight:tab===t.id?"bold":"normal"}}>{t.label}</span>
             </button>
           ))}
+          <button onClick={fetchAdvice} style={{background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,color:"rgba(255,220,80,0.8)"}}>
+            <span style={{fontSize:22}}>💡</span>
+            <span style={{fontSize:10}}>アドバイス</span>
+          </button>
         </div>
       </div>
     </div>
