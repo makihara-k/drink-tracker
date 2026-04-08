@@ -16,7 +16,6 @@ const DAY_JP  = ["日","月","火","水","木","金","土"];
 const LIMIT_G = 20;
 const START_DATE = "2026-04-01";
 
-const GEMINI_KEY = import.meta.env.VITE_GEMINI_KEY || "";
 
 // ── Helpers ──────────────────────────────────────────────────────
 const getToday    = () => new Date().toISOString().split("T")[0];
@@ -716,15 +715,10 @@ export default function DrinkTracker() {
   const analyzePhoto=async(base64)=>{
     setAnalyzing(true);setAiGuess(null);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:60,messages:[{role:"user",content:[
-          {type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64.split(",")[1]}},
-          {type:"text",text:`この画像に写っているお酒を判断。以下のIDから1つ選び{"typeId":"..."}のJSONのみ回答。beer,wine,sake,shochu,chuhai,highball,other`}
-        ]}]})});
+      const res=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({imageBase64:base64.split(",")[1]})});
       const data=await res.json();
-      const text=(data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(text);
-      if(DRINK_TYPES.map(t=>t.id).includes(parsed.typeId)){setSelType(parsed.typeId);setAiGuess(parsed.typeId);}
+      if(DRINK_TYPES.map(t=>t.id).includes(data.typeId)){setSelType(data.typeId);setAiGuess(data.typeId);}
     }catch(e){console.error("AI分析失敗",e);}
     setAnalyzing(false);
   };
@@ -779,13 +773,10 @@ ${summary}
 
 を、友達に話しかけるような温かいトーンで、200字以内でまとめてください。`;
 
-      const res=await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
-        {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})}
-      );
+      const res=await fetch("/api/advice",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({prompt})});
       const data=await res.json();
-      const text=data.candidates?.[0]?.content?.parts?.[0]?.text||"アドバイスを取得できませんでした。";
+      const text=data.text||"アドバイスを取得できませんでした。";
       setAdvice(text);
     }catch(e){
       setAdvice("通信エラーが発生しました。インターネット接続を確認してください。");
