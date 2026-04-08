@@ -734,30 +734,48 @@ export default function DrinkTracker() {
     setAdvice("");
     setAdviceLoading(true);
     try{
-      // 直近7日間のデータをまとめる
-      const dates=getWeekDates(0);
-      const weekSummary=dates.map(d=>{
-        const drinks=allDrinks[d]||[];
-        const alco=calcAlcohol(drinks);
-        const label=new Date(d+"T00:00:00").toLocaleDateString("ja-JP",{month:"numeric",day:"numeric",weekday:"short"});
-        return drinks.length===0
-          ? `${label}: 休肝日`
-          : `${label}: ${drinks.map(dr=>dr.label).join("・")}（${alco}g）`;
-      }).join("\n");
-      const totalAlco=dates.reduce((s,d)=>s+calcAlcohol(allDrinks[d]||[]),0);
-      const noDrinkDays=dates.filter(d=>(allDrinks[d]||[]).length===0).length;
+      // START_DATE以降の全記録日を取得（直近30日以内）
+      const allRecordedDates = Object.keys(allDrinks)
+        .filter(d => d >= START_DATE && (allDrinks[d]||[]).length > 0)
+        .sort();
 
-      const prompt=`あなたは健康的な飲酒習慣をサポートするAIです。以下は私の直近1週間の飲酒記録です。
+      // 記録が1件もない場合
+      if(allRecordedDates.length === 0){
+        setAdvice("まだ記録がありません 🌱\n\nまず今日の飲み物を記録してみてください。記録が1日分でもあればアドバイスできますよ！");
+        setAdviceLoading(false);
+        return;
+      }
 
-${weekSummary}
+      // 直近7日間（START_DATE以降）を集計。記録がある日だけ表示
+      const dates = getWeekDates(0).filter(d => d >= START_DATE);
+      const recordedDays = dates.filter(d => (allDrinks[d]||[]).length > 0);
+      const dayCount = recordedDays.length;
 
-週合計純アルコール: ${totalAlco}g（厚労省推奨: 週140g以下）
+      // サマリー：記録のある日だけ詳細、ない日は省略
+      const summary = dates.map(d => {
+        const drinks = allDrinks[d]||[];
+        const alco = calcAlcohol(drinks);
+        const label = new Date(d+"T00:00:00").toLocaleDateString("ja-JP",{month:"numeric",day:"numeric",weekday:"short"});
+        if(drinks.length === 0) return null;
+        return `${label}: ${drinks.map(dr=>dr.label).join("・")}（${alco}g）`;
+      }).filter(Boolean).join("\n");
+
+      const totalAlco = dates.reduce((s,d)=>s+calcAlcohol(allDrinks[d]||[]),0);
+      const noDrinkDays = dates.filter(d=>(allDrinks[d]||[]).length===0).length;
+
+      const period = dayCount < 3 ? `${dayCount}日分` : `直近${dayCount}日分`;
+
+      const prompt=`あなたは健康的な飲酒習慣をサポートするAIです。以下は私の${period}の飲酒記録です（記録開始からまだ日が浅い可能性があります）。
+
+${summary}
+
+この期間の純アルコール合計: ${totalAlco}g（厚労省推奨: 週140g以下）
 休肝日: ${noDrinkDays}日
 
-この記録を見て、
+記録が少なくても構いません。この記録をもとに、
 ・良かった点（ポジティブな声がけ）
 ・気になる点（あれば、やさしく）
-・来週に向けた具体的なアドバイス1〜2個
+・これからに向けた具体的なアドバイス1〜2個
 
 を、友達に話しかけるような温かいトーンで、200字以内でまとめてください。`;
 
