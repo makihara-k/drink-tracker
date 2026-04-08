@@ -16,6 +16,8 @@ const DAY_JP  = ["日","月","火","水","木","金","土"];
 const LIMIT_G = 20;
 const START_DATE = "2026-04-01";
 
+// ※Vercel版(App.jsx)では import.meta.env.VITE_GEMINI_KEY に置き換える
+const GEMINI_KEY = "";
 
 // ── Helpers ──────────────────────────────────────────────────────
 const getToday    = () => new Date().toISOString().split("T")[0];
@@ -465,7 +467,7 @@ function MonthlyCalendar({ allDrinks, onDeleteDates }) {
 }
 
 // ── Weekly View (dark) ─────────────────────────────────────────
-function WeeklyView({ allDrinks, onDeleteDrink, onDeleteDates }) {
+function WeeklyView({ allDrinks, onDeleteDrink, onDeleteDates, onAddToDate, onEditDrink }) {
   const today=getToday();
   const weekDates=getWeekDates(0).filter(d=>d>=START_DATE);
   const wTotal=weekDates.reduce((s,d)=>s+(allDrinks[d]||[]).length,0);
@@ -477,7 +479,7 @@ function WeeklyView({ allDrinks, onDeleteDrink, onDeleteDates }) {
   };
   return (
     <div style={{padding:"0 16px"}}>
-      <div style={{fontSize:12,color:T.muted,marginBottom:10,textAlign:"center"}}>各お酒の × を押すと削除できます</div>
+      <div style={{fontSize:12,color:T.muted,marginBottom:10,textAlign:"center"}}>✏️ で種類変更 / ＋ で追加 / × で削除</div>
       <div style={{display:"flex",justifyContent:"space-around",...card,marginBottom:12}}>
         {[{val:wTotal,l:"今週の合計",c:T.danger},{val:noDrink,l:"休肝日",c:T.teal},{val:`${wAlco}g`,l:"純アルコール",c:T.warn}].map((s,i)=>(
           <div key={i} style={{textAlign:"center",flex:1,borderLeft:i>0?`1px solid ${T.cardBdr}`:"none"}}>
@@ -496,18 +498,29 @@ function WeeklyView({ allDrinks, onDeleteDrink, onDeleteDates }) {
                 <span style={{fontSize:13,fontWeight:"bold",color:T.text}}>{fmtD(date)}</span>
                 {isToday&&<span style={{background:T.teal,color:"#0A0A14",fontSize:10,borderRadius:4,padding:"1px 7px",fontWeight:"bold"}}>今日</span>}
               </div>
-              <div style={{textAlign:"right"}}>
-                <div style={{fontSize:13,fontWeight:"500",color:stColor}}>{drinks.length===0?"休肝日 🌿":`${drinks.length}杯`}</div>
-                {alco>0&&<div style={{fontSize:11,color:T.muted}}>{alco}g</div>}
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontSize:13,fontWeight:"500",color:stColor}}>{drinks.length===0?"休肝日 🌿":`${drinks.length}杯`}</div>
+                  {alco>0&&<div style={{fontSize:11,color:T.muted}}>{alco}g</div>}
+                </div>
+                {/* ＋ボタン */}
+                <button onClick={()=>onAddToDate(date)} style={{
+                  background:`rgba(62,207,187,0.15)`,border:`1px solid ${T.teal}`,
+                  borderRadius:8,padding:"4px 10px",cursor:"pointer",
+                  color:T.teal,fontSize:13,fontWeight:"bold",flexShrink:0,
+                }}>＋</button>
               </div>
             </div>
             {drinks.length>0&&(
               <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                 {drinks.map(d=>(
-                  <div key={d.id} style={{background:"rgba(255,255,255,0.07)",border:`1px solid ${T.cardBdr}`,borderRadius:20,padding:"4px 6px 4px 10px",fontSize:12,display:"flex",alignItems:"center",gap:4,color:T.text}}>
+                  <div key={d.id} style={{background:"rgba(255,255,255,0.07)",border:`1px solid ${T.cardBdr}`,borderRadius:20,padding:"4px 6px 4px 10px",fontSize:12,display:"flex",alignItems:"center",gap:3,color:T.text}}>
                     {d.thumb&&<img src={d.thumb} alt="" style={{width:18,height:18,borderRadius:"50%",objectFit:"cover"}}/>}
                     <span>{d.emoji} {d.label}</span>
-                    <button onClick={()=>onDeleteDrink(date,d.id)} style={{background:"rgba(224,80,80,0.15)",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:T.danger,fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0,marginLeft:2,flexShrink:0}}>×</button>
+                    {/* ✏️ 編集ボタン */}
+                    <button onClick={()=>onEditDrink(date,d.id,d.type)} style={{background:"rgba(62,207,187,0.12)",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:T.teal,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center",padding:0,marginLeft:1,flexShrink:0}}>✏</button>
+                    {/* × 削除ボタン */}
+                    <button onClick={()=>onDeleteDrink(date,d.id)} style={{background:"rgba(224,80,80,0.15)",border:"none",borderRadius:"50%",width:20,height:20,cursor:"pointer",color:T.danger,fontSize:12,fontWeight:"bold",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1,padding:0,marginLeft:1,flexShrink:0}}>×</button>
                   </div>
                 ))}
               </div>
@@ -611,7 +624,7 @@ function YearlyView({ allDrinks, onDeleteDates }) {
 }
 
 // ── Records View ────────────────────────────────────────────────
-function RecordsView({ allDrinks, onDeleteDrink, onDeleteDates }) {
+function RecordsView({ allDrinks, onDeleteDrink, onDeleteDates, onAddToDate, onEditDrink }) {
   const [sub,setSub]=useState("weekly");
   return (
     <div>
@@ -628,7 +641,7 @@ function RecordsView({ allDrinks, onDeleteDrink, onDeleteDates }) {
           }}>{t.l}</button>
         ))}
       </div>
-      {sub==="weekly"  && <WeeklyView     allDrinks={allDrinks} onDeleteDrink={onDeleteDrink} onDeleteDates={onDeleteDates}/>}
+      {sub==="weekly"  && <WeeklyView     allDrinks={allDrinks} onDeleteDrink={onDeleteDrink} onDeleteDates={onDeleteDates} onAddToDate={onAddToDate} onEditDrink={onEditDrink}/>}
       {sub==="monthly" && <MonthlyCalendar allDrinks={allDrinks} onDeleteDates={onDeleteDates}/>}
       {sub==="yearly"  && <YearlyView     allDrinks={allDrinks} onDeleteDates={onDeleteDates}/>}
     </div>
@@ -650,6 +663,8 @@ export default function DrinkTracker() {
   const [adviceOpen,setAdviceOpen]   = useState(false);
   const [advice,setAdvice]           = useState("");
   const [adviceLoading,setAdviceLoading] = useState(false);
+  const [targetDate,setTargetDate]   = useState(null);   // 過去日付への追加用
+  const [editingDrink,setEditingDrink] = useState(null); // {date,drinkId} 編集用
   const fileRef = useRef();
 
   useEffect(()=>{
@@ -680,12 +695,43 @@ export default function DrinkTracker() {
 
   const handleAdd=async()=>{
     if(!selType)return;
-    const type=DRINK_TYPES.find(t=>t.id===selType),today=getToday();
-    const entry={id:Date.now(),type:type.id,emoji:type.emoji,label:type.label,timestamp:new Date().toISOString(),thumb:photo||null};
-    const updated={...allDrinks,[today]:[...(allDrinks[today]||[]),entry]};
+    const type=DRINK_TYPES.find(t=>t.id===selType);
+    const date=targetDate||getToday();
+
+    let updated;
+    if(editingDrink){
+      // 編集モード：種類だけ差し替え
+      updated={...allDrinks,[editingDrink.date]:(allDrinks[editingDrink.date]||[]).map(d=>
+        d.id===editingDrink.drinkId
+          ? {...d,type:type.id,emoji:type.emoji,label:type.label}
+          : d
+      )};
+    } else {
+      // 追加モード
+      const entry={id:Date.now(),type:type.id,emoji:type.emoji,label:type.label,timestamp:new Date().toISOString(),thumb:photo||null};
+      updated={...allDrinks,[date]:[...(allDrinks[date]||[]),entry]};
+    }
+
     setAllDrinks(updated);await save(updated);
     setSelType(null);setPhoto(null);setAddOpen(false);setAiGuess(null);
-    setJiggle(true);setTimeout(()=>setJiggle(false),600);
+    setTargetDate(null);setEditingDrink(null);
+    if(!editingDrink){ setJiggle(true);setTimeout(()=>setJiggle(false),600); }
+  };
+
+  // 過去の日付に追加するシートを開く
+  const openAddForDate=(date)=>{
+    setTargetDate(date);
+    setEditingDrink(null);
+    setSelType(null);setPhoto(null);setAiGuess(null);
+    setAddOpen(true);
+  };
+
+  // 既存の記録を編集するシートを開く
+  const openEditDrink=(date,drinkId,currentTypeId)=>{
+    setEditingDrink({date,drinkId});
+    setTargetDate(null);
+    setSelType(currentTypeId);setPhoto(null);setAiGuess(null);
+    setAddOpen(true);
   };
 
   const handleDeleteDrink=async(date,drinkId)=>{
@@ -715,10 +761,15 @@ export default function DrinkTracker() {
   const analyzePhoto=async(base64)=>{
     setAnalyzing(true);setAiGuess(null);
     try{
-      const res=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({imageBase64:base64.split(",")[1]})});
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:60,messages:[{role:"user",content:[
+          {type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64.split(",")[1]}},
+          {type:"text",text:`この画像に写っているお酒を判断。以下のIDから1つ選び{"typeId":"..."}のJSONのみ回答。beer,wine,sake,shochu,chuhai,highball,other`}
+        ]}]})});
       const data=await res.json();
-      if(DRINK_TYPES.map(t=>t.id).includes(data.typeId)){setSelType(data.typeId);setAiGuess(data.typeId);}
+      const text=(data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(text);
+      if(DRINK_TYPES.map(t=>t.id).includes(parsed.typeId)){setSelType(parsed.typeId);setAiGuess(parsed.typeId);}
     }catch(e){console.error("AI分析失敗",e);}
     setAnalyzing(false);
   };
@@ -773,20 +824,22 @@ ${summary}
 
 を、友達に話しかけるような温かいトーンで、200字以内でまとめてください。`;
 
-      const res=await fetch("/api/advice",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({prompt})});
+      const res=await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
+        {method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})}
+      );
       const data=await res.json();
-      if(!res.ok) throw new Error(data.error||`APIエラー (${res.status})`);
-      const text=data.text||"アドバイスを取得できませんでした。";
+      const text=data.candidates?.[0]?.content?.parts?.[0]?.text||"アドバイスを取得できませんでした。";
       setAdvice(text);
     }catch(e){
-      setAdvice(`エラー: ${e.message}\n\nVercelのEnvironment VariablesにGEMINI_KEYが正しく設定されているか確認してください。`);
+      setAdvice("通信エラーが発生しました。インターネット接続を確認してください。");
     }
     setAdviceLoading(false);
   };
 
   const handlePhoto=async(e)=>{const f=e.target.files?.[0];if(!f)return;const t=await resizeImage(f);setPhoto(t);setSelType(null);analyzePhoto(t);};
-  const closeAdd=()=>{setAddOpen(false);setSelType(null);setPhoto(null);setAiGuess(null);setAnalyzing(false);};
+  const closeAdd=()=>{setAddOpen(false);setSelType(null);setPhoto(null);setAiGuess(null);setAnalyzing(false);setTargetDate(null);setEditingDrink(null);};
 
   const stColor=[T.teal,"#7BAE4A",T.warn,"#E07050",T.danger][status.level];
 
@@ -845,7 +898,17 @@ ${summary}
             boxShadow:"0 -12px 40px rgba(0,0,0,0.6)",
           }} onClick={e=>e.stopPropagation()}>
             <div style={{width:36,height:4,background:"rgba(255,255,255,0.15)",borderRadius:99,margin:"0 auto 20px"}}/>
-            <div style={{fontSize:16,fontWeight:"bold",color:T.text,marginBottom:14}}>何を飲みましたか？</div>
+            <div style={{fontSize:16,fontWeight:"bold",color:T.text,marginBottom:4}}>
+              {editingDrink ? "記録を変更する ✏️" : "何を飲みましたか？"}
+            </div>
+            {(targetDate||editingDrink)&&(
+              <div style={{fontSize:12,color:T.teal,marginBottom:12}}>
+                {editingDrink
+                  ? `${new Date(editingDrink.date+"T00:00:00").toLocaleDateString("ja-JP",{month:"numeric",day:"numeric",weekday:"short"})} の記録を編集中`
+                  : `${new Date(targetDate+"T00:00:00").toLocaleDateString("ja-JP",{month:"numeric",day:"numeric",weekday:"short"})} に追加`
+                }
+              </div>
+            )}
 
             {/* Photo first */}
             <div style={{marginBottom:16}}>
@@ -905,7 +968,7 @@ ${summary}
               boxShadow:selType?`0 4px 20px ${T.teal}40`:"none",
               transition:"all 0.2s",
             }}>
-              胃に流し込む 🫧
+              {editingDrink ? "変更を保存する ✓" : "胃に流し込む 🫧"}
             </button>
           </div>
         </div>
@@ -963,7 +1026,7 @@ ${summary}
           )}
         </div>
       )}
-      {tab==="records"&&<RecordsView allDrinks={allDrinks} onDeleteDrink={handleDeleteDrink} onDeleteDates={handleDeleteDates}/>}
+      {tab==="records"&&<RecordsView allDrinks={allDrinks} onDeleteDrink={handleDeleteDrink} onDeleteDates={handleDeleteDates} onAddToDate={openAddForDate} onEditDrink={openEditDrink}/>}
 
       {/* ── Advice Modal ── */}
       {adviceOpen&&(
