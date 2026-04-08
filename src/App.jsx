@@ -776,10 +776,11 @@ ${summary}
       const res=await fetch("/api/advice",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({prompt})});
       const data=await res.json();
+      if(!res.ok) throw new Error(data.error||`APIエラー (${res.status})`);
       const text=data.text||"アドバイスを取得できませんでした。";
       setAdvice(text);
     }catch(e){
-      setAdvice("通信エラーが発生しました。インターネット接続を確認してください。");
+      setAdvice(`エラー: ${e.message}\n\nVercelのEnvironment VariablesにGEMINI_KEYが正しく設定されているか確認してください。`);
     }
     setAdviceLoading(false);
   };
