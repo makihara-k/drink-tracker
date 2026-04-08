@@ -16,8 +16,6 @@ const DAY_JP  = ["日","月","火","水","木","金","土"];
 const LIMIT_G = 20;
 const START_DATE = "2026-04-01";
 
-// ※Vercel版(App.jsx)では import.meta.env.VITE_GEMINI_KEY に置き換える
-const GEMINI_KEY = "";
 
 // ── Helpers ──────────────────────────────────────────────────────
 const getToday    = () => new Date().toISOString().split("T")[0];
@@ -668,25 +666,21 @@ export default function DrinkTracker() {
   const fileRef = useRef();
 
   useEffect(()=>{
-    (async()=>{
-      try{
-        const r=await window.storage.get("drink-data-v2");
-        if(r){
-          const raw=JSON.parse(r.value);
-          // 2026-04-01より前のキーを自動削除
-          const cleaned=Object.fromEntries(Object.entries(raw).filter(([k])=>k>=START_DATE));
-          setAllDrinks(cleaned);
-          // キーが減っていたら保存し直す
-          if(Object.keys(cleaned).length < Object.keys(raw).length){
-            await window.storage.set("drink-data-v2",JSON.stringify(cleaned));
-          }
+    try{
+      const raw=localStorage.getItem("drink-data-v2");
+      if(raw){
+        const data=JSON.parse(raw);
+        const cleaned=Object.fromEntries(Object.entries(data).filter(([k])=>k>=START_DATE));
+        setAllDrinks(cleaned);
+        if(Object.keys(cleaned).length < Object.keys(data).length){
+          localStorage.setItem("drink-data-v2",JSON.stringify(cleaned));
         }
-      }catch(_){}
-      setLoading(false);
-    })();
+      }
+    }catch(_){}
+    setLoading(false);
   },[]);
 
-  const save=async(data)=>{try{await window.storage.set("drink-data-v2",JSON.stringify(data));}catch(e){console.error(e);}};
+  const save=(data)=>{try{localStorage.setItem("drink-data-v2",JSON.stringify(data));}catch(e){console.error(e);}};
 
   const todayDrinks=allDrinks[getToday()]||[];
   const todayAlcohol=calcAlcohol(todayDrinks);
@@ -712,7 +706,7 @@ export default function DrinkTracker() {
       updated={...allDrinks,[date]:[...(allDrinks[date]||[]),entry]};
     }
 
-    setAllDrinks(updated);await save(updated);
+    setAllDrinks(updated);save(updated);
     setSelType(null);setPhoto(null);setAddOpen(false);setAiGuess(null);
     setTargetDate(null);setEditingDrink(null);
     if(!editingDrink){ setJiggle(true);setTimeout(()=>setJiggle(false),600); }
@@ -736,40 +730,35 @@ export default function DrinkTracker() {
 
   const handleDeleteDrink=async(date,drinkId)=>{
     const updated={...allDrinks,[date]:(allDrinks[date]||[]).filter(d=>d.id!==drinkId)};
-    setAllDrinks(updated);await save(updated);
+    setAllDrinks(updated);save(updated);
   };
 
   const handleDeleteDates=async(dates)=>{
     const updated={...allDrinks};
     dates.forEach(d=>{ delete updated[d]; });
-    setAllDrinks(updated);await save(updated);
+    setAllDrinks(updated);save(updated);
   };
 
   const handleUndoLast=async()=>{
     const today=getToday(),list=allDrinks[today]||[];
     if(!list.length)return;
     const updated={...allDrinks,[today]:list.slice(0,-1)};
-    setAllDrinks(updated);await save(updated);
+    setAllDrinks(updated);save(updated);
   };
 
   const handleReset=async()=>{
     setAllDrinks({});
-    await save({});
+    save({});
     setConfirmReset(false);
   };
 
   const analyzePhoto=async(base64)=>{
     setAnalyzing(true);setAiGuess(null);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:60,messages:[{role:"user",content:[
-          {type:"image",source:{type:"base64",media_type:"image/jpeg",data:base64.split(",")[1]}},
-          {type:"text",text:`この画像に写っているお酒を判断。以下のIDから1つ選び{"typeId":"..."}のJSONのみ回答。beer,wine,sake,shochu,chuhai,highball,other`}
-        ]}]})});
+      const res=await fetch("/api/analyze",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({imageBase64:base64.split(",")[1]})});
       const data=await res.json();
-      const text=(data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
-      const parsed=JSON.parse(text);
-      if(DRINK_TYPES.map(t=>t.id).includes(parsed.typeId)){setSelType(parsed.typeId);setAiGuess(parsed.typeId);}
+      if(DRINK_TYPES.map(t=>t.id).includes(data.typeId)){setSelType(data.typeId);setAiGuess(data.typeId);}
     }catch(e){console.error("AI分析失敗",e);}
     setAnalyzing(false);
   };
@@ -824,16 +813,14 @@ ${summary}
 
 を、友達に話しかけるような温かいトーンで、200字以内でまとめてください。`;
 
-      const res=await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_KEY}`,
-        {method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})}
-      );
+      const res=await fetch("/api/advice",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({prompt})});
       const data=await res.json();
-      const text=data.candidates?.[0]?.content?.parts?.[0]?.text||"アドバイスを取得できませんでした。";
+      if(!res.ok) throw new Error(data.error||`APIエラー (${res.status})`);
+      const text=data.text||"アドバイスを取得できませんでした。";
       setAdvice(text);
     }catch(e){
-      setAdvice("通信エラーが発生しました。インターネット接続を確認してください。");
+      setAdvice(`エラー: ${e.message}`);
     }
     setAdviceLoading(false);
   };
